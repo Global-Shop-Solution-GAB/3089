@@ -1,0 +1,250 @@
+Program.Sub.ScreenSU.Start
+Program.Sub.ScreenSU.End
+
+Program.Sub.Preflight.Start
+Variable.Global.sBatches.Declare(String)
+Variable.UDT.uBatches.Define("Batch",String)
+Variable.uGlobal.uBatches.Declare("uBatches")
+Variable.UDT.uDetail.Define("CUSTOMER",String)
+Variable.UDT.uDetail.Define("ORDER_NO",String)
+Variable.UDT.uDetail.Define("DATE_INVOICE",String)
+Variable.UDT.uDetail.Define("LINE_TOTALS",Float)
+Variable.UDT.uDetail.Define("COST",Float)
+Variable.UDT.uDetail.Define("DATE_SHIPPED",String)
+Variable.UDT.uDetail.Define("FREIGHT",Float)
+Variable.UDT.uDetail.Define("TAX",Float)
+Variable.UDT.uDetail.Define("YEAR",String)
+Variable.UDT.uDetail.Define("BATCH_DATE",String)
+Variable.UDT.uDetail.Define("BATCH",String)
+Variable.UDT.uDetail.Define("INVOICE",String)
+Variable.uGlobal.uDetail.Declare("uDetail")
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+F.ODBC.Connection!CONX.OpenConnection(V.Ambient.PDSN,V.Ambient.PUser,V.Ambient.PPass,7200)
+V.Local.sFinalMessage.Declare(String)
+F.Intrinsic.UI.InvokeWaitDialog("Checking Existance of Directory","Please Wait")
+F.Intrinsic.Control.CallSub(Checkdir)
+F.Intrinsic.UI.ChangeWaitStatus("Getting list of batches to exclude")
+F.Intrinsic.Control.CallSub(Getprocessedbatches)
+F.Intrinsic.UI.ChangeWaitStatus("Getting/Processing Data")
+F.Intrinsic.Control.CallSub(Getdata)
+F.Intrinsic.UI.ChangeWaitStatus("Exporting Data to CSV File")
+F.Intrinsic.Control.CallSub(Exportdata)
+F.Intrinsic.UI.ChangeWaitStatus("Adding Processed Batches to Exclusions List")
+F.Intrinsic.Control.CallSub(Stopbatches)
+F.Intrinsic.String.Concat("Successfully created CSV File:",V.Ambient.NewLine,V.Args.FilePath,V.Local.sFinalMessage)
+F.Intrinsic.UI.ChangeWaitStatus(V.Local.sFinalMessage)
+F.Intrinsic.UI.Sleep(5)
+F.Intrinsic.UI.CloseWaitDialog
+F.Intrinsic.Control.CallSub(Unload)
+
+
+
+Program.Sub.Main.End
+
+Program.Sub.GetProcessedBatches.Start
+V.Global.sBatches.Set("('")
+
+F.ODBC.Connection!CONX.OpenLocalRecordsetRO("rst","SELECT BATCH FROM GCG_CT_PROC_BATCHES WHERE TYPE ='AR'")
+F.Intrinsic.Control.DoUntil(V.ODBC.CONX!rst.EOF,=,True)
+	F.Intrinsic.Control.If(V.Global.sBatches,=,"('")
+		F.Intrinsic.String.Concat(V.Global.sBatches,V.ODBC.CONX!rst.FieldValTrim!BATCH,"'",V.Global.sBatches)
+	F.Intrinsic.Control.Else
+		F.Intrinsic.String.Concat(V.Global.sBatches,",'",V.ODBC.CONX!rst.FieldValTrim!BATCH,"'",V.Global.sBatches)
+	F.Intrinsic.Control.EndIf
+	F.ODBC.CONX!rst.MoveNext
+F.Intrinsic.Control.Loop
+F.Intrinsic.String.Concat(V.Global.sBatches,")",V.Global.sBatches)
+F.ODBC.CONX!rst.Close
+
+
+
+
+Program.Sub.GetProcessedBatches.End
+
+Program.Sub.GetData.Start
+V.Local.sSQL.Declare(String)
+V.Local.i.Declare(Long)
+V.Local.sYear.Declare(String)
+V.Local.sTax.Declare(String)
+
+F.Intrinsic.Control.If(V.Global.sBatches,=,"(')")
+	'No records exist yet. ignore batch selection
+	V.Local.sSQL.Set("Select CUSTOMER, ORDER_NO, DATE_INVOICE, DATE_SHIPPED, BATCH, INVOICE FROM V_ORDER_HIST_HEAD WHERE BATCH <> ''")
+F.Intrinsic.Control.Else
+	F.Intrinsic.String.Concat(" Select CUSTOMER, ORDER_NO, DATE_INVOICE, DATE_SHIPPED, BATCH, INVOICE FROM V_ORDER_HIST_HEAD WHERE BATCH <> '' and BATCH NOT IN ",V.Global.sBatches,V.Local.sSQL)
+F.Intrinsic.Control.EndIf
+
+V.uGlobal.uBatches.Redim(-1,-1)
+V.uGlobal.uDetail.Redim(-1,-1)
+V.Local.i.Set(-1)
+
+F.ODBC.Connection!CONX.OpenLocalRecordsetRO("rst",V.Local.sSQL)
+F.Intrinsic.Control.If(V.ODBC.CONX!rst.EOF,=,True)
+	F.Intrinsic.UI.Msgbox("No Records Were Found to Export")
+	F.ODBC.CONX!rst.Close
+	F.Intrinsic.Control.CallSub(Unload)
+F.Intrinsic.Control.Else
+	F.Intrinsic.Control.DoUntil(V.ODBC.CONX!rst.EOF,=,True)
+		F.Intrinsic.Control.If(V.Local.i,=,-1)
+			V.Local.i.Set(0)
+			V.uGlobal.uBatches.Redim(0,0)
+			V.uGlobal.uDetail.Redim(0,0)
+		F.Intrinsic.Control.Else
+			F.Intrinsic.Math.Add(V.Local.i,1,V.Local.i)
+			V.uGlobal.uBatches.RedimPreserve(0,V.Local.i)
+			V.uGlobal.uDetail.RedimPreserve(0,V.Local.i)
+		F.Intrinsic.Control.EndIf
+		V.uGlobal.uBatches(v.Local.i)!Batch.Set(V.ODBC.CONX!rst.FieldValTrim!BATCH)
+		V.uGlobal.uDetail(V.Local.i)!CUSTOMER.Set(V.ODBC.CONX!rst.FieldValTrim!CUSTOMER)
+		V.uGlobal.uDetail(V.Local.i)!ORDER_NO.Set(V.ODBC.CONX!rst.FieldValTrim!ORDER_NO)
+		V.uGlobal.uDetail(V.Local.i)!DATE_INVOICE.Set(V.ODBC.CONX!rst.FieldValTrim!DATE_INVOICE)
+		V.uGlobal.uDetail(V.Local.i)!DATE_SHIPPED.Set(V.ODBC.CONX!rst.FieldValTrim!DATE_SHIPPED)
+		F.Intrinsic.String.Format(V.ODBC.CONX!rst.FieldValTrim!DATE_INVOICE,"MMYYYY",V.uGlobal.uDetail(V.Local.i)!YEAR)
+		V.uGlobal.uDetail(V.Local.i)!BATCH_DATE.Set(V.ODBC.CONX!rst.FieldValTrim!DATE_INVOICE)
+		V.uGlobal.uDetail(V.Local.i)!BATCH.Set(V.ODBC.CONX!rst.FieldValTrim!BATCH)
+		V.uGlobal.uDetail(V.Local.i)!INVOICE.Set(V.ODBC.CONX!rst.FieldValTrim!INVOICE)
+		F.Intrinsic.String.Concat("SELECT SUM(COST) AS COST, SUM(EXTENSION) AS PRICE FROM V_ORDER_HIST_LINE WHERE ORDER_NO = '",V.uGlobal.uDetail(V.Local.i)!ORDER_NO.Trim,"' AND LINE_TYPE <> 'F'",V.Local.sSQL)
+		F.ODBC.Connection!CONX.OpenLocalRecordsetRO("rstCOSTPRICE",V.Local.sSQL)
+		F.Intrinsic.Control.If(V.ODBC.CONX!rstCOSTPRICE.EOF,=,True)
+			V.uGlobal.uDetail(V.Local.I)!LINE_TOTALS.Set(0)
+			V.uGlobal.uDetail(V.Local.i)!COST.Set(0)
+		F.Intrinsic.Control.Else
+			V.uGlobal.uDetail(V.Local.i)!COST.Set(V.ODBC.CONX!rstCOSTPRICE.FieldValTrim!COST)
+			V.uGlobal.uDetail(V.Local.i)!LINE_TOTALS.Set(V.ODBC.CONX!rstCOSTPRICE.FieldValTrim!PRICE)
+		F.Intrinsic.Control.EndIf
+		F.ODBC.CONX!rstCOSTPRICE.Close
+		F.Intrinsic.String.Concat("SELECT SUM(TAX_AMT_1) AS TAX_AMT_1,SUM(TAX_AMT_2) AS TAX_AMT_2,SUM(TAX_AMT_3) AS TAX_AMT_3,SUM(TAX_AMT_4) AS TAX_AMT_4,SUM(TAX_AMT_5) AS TAX_AMT_5,SUM(TAX_AMT_6) AS TAX_AMT_6,SUM(TAX_AMT_7) AS TAX_AMT_7,SUM(TAX_AMT_8) AS TAX_AMT_8,SUM(TAX_AMT_9) AS TAX_AMT_9,SUM(TAX_AMT_10) AS TAX_AMT_10 FROM V_ORDER_HIST_LINE WHERE ORDER_NO ='",V.uGlobal.uDetail(V.Local.i)!ORDER_NO,"'",V.Local.sSQL)
+		F.ODBC.Connection!CONX.OpenLocalRecordsetRO("rstTax",V.Local.sSQL)
+		F.Intrinsic.Control.If(V.ODBC.CONX!rstTax.EOF,=,True)
+			V.uGlobal.uDetail(v.Local.i)!TAX.Set(0)
+		F.Intrinsic.Control.Else
+			F.Intrinsic.Math.Add(V.ODBC.CONX!rsttax.FieldValTrim!TAX_AMT_1,V.ODBC.CONX!rstTax.FieldValTrim!TAX_AMT_2,V.Local.sTax)
+			F.Intrinsic.Math.Add(V.Local.sTax,V.ODBC.CONX!rsTTAX.FieldValTrim!TAX_AMT_3,V.Local.sTax)
+			F.Intrinsic.Math.Add(V.Local.sTax,V.ODBC.CONX!rsTTAX.FieldValTrim!TAX_AMT_4,V.Local.sTax)
+			F.Intrinsic.Math.Add(V.Local.sTax,V.ODBC.CONX!rsTTAX.FieldValTrim!TAX_AMT_5,V.Local.sTax)
+			F.Intrinsic.Math.Add(V.Local.sTax,V.ODBC.CONX!rsTTAX.FieldValTrim!TAX_AMT_6,V.Local.sTax)
+			F.Intrinsic.Math.Add(V.Local.sTax,V.ODBC.CONX!rsTTAX.FieldValTrim!TAX_AMT_7,V.Local.sTax)
+			F.Intrinsic.Math.Add(V.Local.sTax,V.ODBC.CONX!rsTTAX.FieldValTrim!TAX_AMT_8,V.Local.sTax)
+			F.Intrinsic.Math.Add(V.Local.sTax,V.ODBC.CONX!rsTTAX.FieldValTrim!TAX_AMT_9,V.Local.sTax)
+			F.Intrinsic.Math.Add(V.Local.sTax,V.ODBC.CONX!rsTTAX.FieldValTrim!TAX_AMT_10,V.Local.sTax)
+			V.uGlobal.uDetail(V.Local.i)!TAX.Set(V.Local.sTax)
+		F.Intrinsic.Control.EndIf
+		F.ODBC.CONX!rstTax.Close
+		F.Intrinsic.String.Concat("SELECT SUM(EXTENSION) AS FREIGHT FROM V_ORDER_HIST_LINE WHERE ORDER_NO = '",V.uGlobal.uDetail(V.Local.i)!ORDER_NO,"' AND LINE_TYPE = 'F'",V.Local.sSQL)
+		F.ODBC.Connection!CONX.OpenLocalRecordsetRO("rstFreight",V.Local.sSQL)
+		F.Intrinsic.Control.If(V.ODBC.CONX!rstFreight.EOF,=,True)
+			V.uGlobal.uDetail(V.Local.i)!FREIGHT.Set(0)
+		F.Intrinsic.Control.Else
+			V.uGlobal.uDetail(V.Local.i)!FREIGHT.Set(V.ODBC.CONX!rstFreight.FieldValTrim!FREIGHT)
+		F.Intrinsic.Control.EndIf
+		F.ODBC.CONX!rstFREIGHT.Close
+		F.ODBC.CONX!rst.MoveNext
+	F.Intrinsic.Control.Loop
+F.Intrinsic.Control.EndIf
+F.ODBC.CONX!rst.Close
+
+
+
+
+
+
+	
+
+		
+
+
+Program.Sub.GetData.End
+
+Program.Sub.UNLOAD.Start
+F.ODBC.Connection!CONX.Close
+F.Intrinsic.Control.End
+
+Program.Sub.UNLOAD.End
+
+Program.Sub.ExportData.Start
+V.Local.sData.Declare(String)
+V.Local.sFilePath.Declare(String)
+V.Local.sElements.Declare(String)
+V.Local.bExists.Declare(Boolean)
+V.Local.sDate.Declare(String)
+V.Local.iCount.Declare(Long)
+V.Local.iCount.Set(1)
+
+F.Intrinsic.String.Format(V.Ambient.Date,"YYYYMMDD",V.Local.sDate)
+
+F.Intrinsic.Variable.UDTMultiQuickSort(V.uGlobal.uDetail!CUSTOMER,False,V.uGlobal.uDetail!ORDER_NO,False,V.uGlobal.uDetail!BATCH,False)
+V.Local.sElements.Set("CUSTOMER*!*ORDER_NO*!*DATE_INVOICE*!*LINE_TOTALS*!*COST*!*DATE_SHIPPED*!*FREIGHT*!*TAX*!*YEAR*!*BATCH*!*BATCH_DATE*!*INVOICE")
+F.Intrinsic.Variable.UDTToString(V.uGlobal.uDetail,V.Local.sElements,V.Ambient.NewLine,",",V.Local.sData)
+
+F.Intrinsic.String.Concat(V.Caller.FilesDir,"\Accounting Exports\AR\AR-",V.Local.sDate,".csv",V.Local.sFilePath)
+F.Intrinsic.File.Exists(V.Local.sFilePath,V.Local.bExists)
+F.Intrinsic.Control.If(V.Local.bExists,=,False)
+	F.Intrinsic.File.String2File(V.Local.sFilePath,V.Local.sData)
+F.Intrinsic.Control.Else
+	F.Intrinsic.Control.DoUntil(V.Local.bExists,=,False)
+		F.Intrinsic.String.Concat(V.Caller.FilesDir,"\Accounting Exports\AR\AR-",V.Local.sDate,"-",V.Local.iCount,".csv",V.Local.sFilePath)
+		F.Intrinsic.File.Exists(V.Local.sFilePath,V.Local.bExists)
+		F.Intrinsic.Math.Add(V.Local.iCount,1,V.Local.iCount)
+	F.Intrinsic.Control.Loop
+	F.Intrinsic.File.String2File(V.Local.sFilePath,V.Local.sData)
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Variable.AddRV("FilePath",V.Local.sFilePath)
+F.Intrinsic.Control.ExitSub
+
+
+
+Program.Sub.ExportData.End
+
+Program.Sub.CheckDir.Start
+V.Local.sFilePath.Declare(String)
+V.Local.bExists.Declare(Boolean)
+V.Local.sMSG.Declare(String)
+F.Intrinsic.String.Concat(V.Caller.FilesDir,"\Accounting Exports\AR\",V.Local.sFilePath)
+F.Intrinsic.File.DirExists(V.Local.sFilePath,V.Local.bExists)
+F.Intrinsic.Control.If(V.Local.bExists,=,False)
+	F.Intrinsic.String.Concat(V.Local.sFilePath," Does not exist. Create directory before continuing",V.Local.sMSG)
+	F.Intrinsic.UI.Msgbox(V.Local.sMSG,"ERROR")
+	F.Intrinsic.Control.CallSub(Unload)
+F.Intrinsic.Control.EndIf
+
+
+Program.Sub.CheckDir.End
+
+Program.Sub.StopBatches.Start
+F.Intrinsic.Variable.UDTMultiFlagDuplicates(V.uGlobal.uBatches!Batch)
+F.Intrinsic.Variable.UDTDeleteFlagged(V.uGlobal.uBatches)
+
+V.Local.I.Declare(Long)
+V.Local.iID.Declare(Long)
+F.ODBC.Connection!CONX.OpenLocalRecordsetRO("rstTOP","SELECT TOP 1 KEY_ID FROM GCG_CT_PROC_BATCHES ORDER BY KEY_ID DESC")
+F.Intrinsic.Control.If(V.ODBC.CONX!rstTOP.EOF,=,True)
+	V.Local.iID.Set(0)
+F.Intrinsic.Control.Else
+	V.Local.iID.Set(V.ODBC.CONX!rstTOP.FieldValTrim!KEY_ID)
+F.Intrinsic.Control.EndIf
+F.ODBC.CONX!rstTOP.Close
+
+F.ODBC.Connection!CONX.OpenLocalRecordsetRW("rstStop","SELECT * FROM GCG_CT_PROC_BATCHES")
+F.Intrinsic.Control.For(V.Local.I,0,V.uGlobal.uBatches.UBound,1)
+	F.Intrinsic.Math.Add(V.Local.iID,1,V.Local.iID)
+	F.ODBC.CONX!rstStop.AddNew
+	F.ODBC.CONX!rstSTOP.Set!KEY_ID(V.Local.iID)
+	F.ODBC.CONX!rstSTOP.set!TYPE("AR")
+	F.ODBC.CONX!rstSTOP.Set!BATCH(V.uGlobal.uBatches(V.Local.I)!Batch.Trim)
+	F.ODBC.CONX!rstStop.Set!PROCESS_DATE(V.Ambient.Date)
+	F.ODBC.CONX!rstStop.Set!PROCESS_USER(V.Caller.User)
+F.Intrinsic.Control.Next(V.Local.I)
+F.ODBC.CONX!rstSTOP.Update
+F.ODBC.CONX!rstStop.Close
+
+
+
+Program.Sub.StopBatches.End
+
+Program.Sub.Comments.Start
+${$0$}$GCG_CT_AR_BATCH_EXPORT$}$BLEFLER$}$4/10/2014
+Program.Sub.Comments.End
+
