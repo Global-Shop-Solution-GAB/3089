@@ -1,0 +1,218 @@
+Program.Sub.ScreenSU.Start
+Program.Sub.ScreenSU.End
+
+Program.Sub.Preflight.Start
+
+Variable.Global.sBatches.Declare(String)
+Variable.Global.fRate.Declare(Float,0)
+Variable.UDT.uBatches.Define("Batch",String)
+Variable.UDT.uDetail.Define("JobSuff",String)
+Variable.UDT.uDetail.Define("Rate",Float)
+Variable.UDT.uDetail.Define("Hours",Float)
+Variable.UDT.uDetail.Define("Extended",Float)
+Variable.UDT.uDetail.Define("Period",String)
+Variable.UDT.uDetail.Define("Batch_Num",String)
+Variable.UDT.uDetail.Define("Date_Batch",String)
+Variable.uGlobal.uBatches.Declare("uBatches")
+Variable.uGlobal.uDetail.Declare("uDetail")
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+F.ODBC.Connection!cONX.OpenConnection(V.Ambient.PDSN,V.Ambient.PUser,V.Ambient.PPass,7200)
+V.Local.sFinalMessage.Declare(String)
+F.Intrinsic.UI.InvokeWaitDialog("Checking Existance of Directory","Please Wait")
+F.Intrinsic.Control.CallSub(Checkdir)
+F.Intrinsic.UI.ChangeWaitStatus("Getting/Verifying Rate")
+F.Intrinsic.Control.CallSub(Getrate)
+Function.Intrinsic.UI.changewaitstatus("Getting list of batches to exclude")
+Function.Intrinsic.Control.callsub(Getprocessedbatches)
+Function.Intrinsic.UI.ChangeWaitStatus("Getting/Processing Data")
+Function.Intrinsic.Control.callsub(Getdata)
+Function.Intrinsic.UI.ChangeWaitStatus("Exporting Data to CSV File")
+Function.Intrinsic.Control.CallSub(Exportdata)
+F.Intrinsic.UI.ChangeWaitStatus("Adding Processed Batches to Exclusions List")
+F.Intrinsic.Control.CallSub(Stopbatches)
+F.Intrinsic.String.Concat("Successfully created CSV File:",V.Ambient.NewLine,V.Args.FilePath,V.Local.sFinalMessage)
+F.Intrinsic.UI.ChangeWaitStatus(V.Local.sFinalMessage)
+F.Intrinsic.UI.Sleep(5)
+F.Intrinsic.UI.CloseWaitDialog
+F.Intrinsic.Control.CallSub(Unload)
+
+Program.Sub.Main.End
+
+Program.Sub.UNLOAD.Start
+F.ODBC.Connection!cONX.Close
+F.Intrinsic.Control.End
+
+Program.Sub.UNLOAD.End
+
+Program.Sub.CheckDir.Start
+V.Local.sFilePath.Declare(String)
+V.Local.bExists.Declare(Boolean)
+V.Local.sMsg.Declare(String)
+F.Intrinsic.String.Concat(V.Caller.FilesDir,"\Accounting Exports\Labor\",V.Local.sFilePath)
+F.Intrinsic.File.DirExists(V.Local.sFilePath,V.Local.bExists)
+F.Intrinsic.Control.If(V.Local.bExists,=,False)
+    Function.Intrinsic.String.Concat(Variable.Local.sFilepath,"Does not exist. Create directory before continuing",Variable.Local.sMsg)
+    Function.Intrinsic.UI.Msgbox(Variable.Local.sMsg)
+    Function.Intrinsic.Control.callsub(Unload)
+Function.Intrinsic.Control.EndIf
+
+Program.Sub.CheckDir.End
+
+Program.Sub.GetProcessedBatches.Start
+Variable.Global.sBatches.set("('")
+Function.ODBC.Connection!cONX.OpenLocalRecordsetRO("RST","SELECT BATCH FROM GCG_CT_PROC_BATCHES WHERE TYPE ='LB'")
+Function.Intrinsic.Control.DoUntil(Variable.ODBC.CONX!RST.EOF,=,True)
+    Function.Intrinsic.Control.IF(Variable.Global.SBATCHES,=,"('")
+        Function.Intrinsic.String.Concat(Variable.Global.SBATCHES,Variable.ODBC.cONX!RST.FIELDVALTRIM!BATCH,"'",V.GLOBAL.SBATCHES)
+    Function.Intrinsic.Control.Else
+        Function.Intrinsic.String.Concat(Variable.Global.SBATCHES,",'",Variable.ODBC.CONX!RST.FIELDVALTRIM!BATCH,"'",V.GLOBAL.SBATCHES)
+    Function.Intrinsic.Control.EndIf
+    Function.ODBC.CONX!RST.MoveNext
+Function.Intrinsic.Control.Loop
+Function.Intrinsic.String.CONCAT(Variable.Global.SBATCHES,")",Variable.GLOBAL.SBATCHES)
+Function.ODBC.CONX!RST.Close
+
+Program.Sub.GetProcessedBatches.End
+
+Program.Sub.GetData.Start
+V.Local.I.Declare(Long)
+V.Local.sSQL.Declare(String)
+
+V.Local.I.Set(-1)
+V.uGlobal.uBatches.Redim(-1,-1)
+V.uGlobal.uDetail.Redim(-1,-1)
+
+F.Intrinsic.Control.If(V.Global.sBatches,=,"(')")
+	V.Local.sSQL.Set("SELECT JOB, SUFFIX, SUM(HOURS_WORKED) AS HOURS_WORKED, MAX(DATE_LAST_CHG) AS DATE_LAST_CHG, LBR_BATCH_NO FROM V_JOB_DETAIL WHERE LBR_BATCH_NO <> '' GROUP BY JOB,SUFFIX, LBR_BATCH_NO")
+F.Intrinsic.Control.Else
+	F.Intrinsic.String.Concat("SELECT JOB, SUFFIX, SUM(HOURS_WORKED) AS HOURS_WORKED, MAX(DATE_LAST_CHG) AS DATE_LAST_CHG, LBR_BATCH_NO FROM V_JOB_DETAIL WHERE LBR_BATCH_NO <>'' AND LBR_BATCH_NO NOT IN ",V.Global.sBatches," GROUP BY JOB, SUFFIX, LBR_BATCH_NO",V.Local.sSQL)
+F.Intrinsic.Control.EndIf
+
+F.ODBC.Connection!cONX.OpenLocalRecordsetRO("rst",V.Local.sSQL)
+F.Intrinsic.Control.If(V.ODBC.cONX!RST.EOF,=,True)
+	F.Intrinsic.UI.Msgbox("No Records Were Found to Export")
+	F.ODBC.cONX!RST.Close
+	F.Intrinsic.Control.CallSub(Unload)
+F.Intrinsic.Control.Else
+	F.Intrinsic.Control.DoUntil(V.ODBC.cONX!RST.EOF,=,True)
+		F.Intrinsic.Control.If(V.Local.I,=,-1)
+			V.uGlobal.uBatches.Redim(0,0)
+			V.uGlobal.uDetail.Redim(0,0)
+		F.Intrinsic.Control.Else
+			F.Intrinsic.Math.Add(V.Local.I,1,V.Local.I)
+			V.uGlobal.uBatches.RedimPreserve(0,V.Local.I)
+			V.uGlobal.uDetail.RedimPreserve(0,V.Local.I)
+		F.Intrinsic.Control.EndIf
+		V.uGlobal.uBatches(v.Local.I)!Batch.Set(V.ODBC.cONX!RST.FieldValTrim!LBR_BATCH_NO)
+		F.Intrinsic.String.Concat(V.ODBC.cONX!RST.FieldValTrim!JOB,V.ODBC.cONX!RST.FieldValTrim!SUFFIX,V.uGlobal.uDetail(V.Local.I)!JobSuff)
+		V.uGlobal.uDetail(V.Local.I)!Rate.Set(V.Global.fRate)
+		V.uGlobal.uDetail(V.Local.I)!Hours.Set(V.ODBC.cONX!RST.FieldValFloat!HOURS_WORKED)
+		F.Intrinsic.Math.Mult(V.uGlobal.uDetail(V.Local.I)!Rate,V.uGlobal.uDetail(V.Local.I)!Hours,V.uGlobal.uDetail(V.Local.I)!Extended)
+		F.Intrinsic.String.Format(V.ODBC.cONX!RST.FieldValTrim!DATE_LAST_CHG,"MMYYYY",V.uGlobal.uDetail(V.Local.I)!Period)
+		V.uGlobal.uDetail(v.Local.I)!Batch_Num.Set(V.ODBC.cONX!RST.FieldValTrim!LBR_BATCH_NO)
+		V.uGlobal.uDetail(V.Local.I)!Date_Batch.Set(V.ODBC.cONX!RST.FieldValTrim!DATE_LAST_CHG)
+		F.ODBC.cONX!RST.MoveNext
+	F.Intrinsic.Control.Loop
+F.Intrinsic.Control.endIF
+
+
+
+
+
+	
+
+Program.Sub.GetData.End
+
+Program.Sub.GetRate.Start
+V.Local.sFilePath.Declare(String)
+V.Local.sRate.Declare(String)
+V.Local.bExists.Declare(Boolean)
+V.Local.bNumeric.Declare(Boolean)
+V.Local.sMSG.Declare(String)
+
+F.Intrinsic.String.Concat(V.Caller.FilesDir,"\Accounting Exports\LBREXPORTRATE.CONFIG",V.Local.sFilePath)
+F.Intrinsic.File.Exists(V.Local.sFilePath,V.Local.bExists)
+F.Intrinsic.Control.If(V.Local.bExists,=,False)
+	F.Intrinsic.String.Concat(V.Local.sFilePath," Could not be found. Create the file, and set the rate to continue",V.Local.sMSG)
+	F.Intrinsic.UI.Msgbox(V.Local.sMSG)
+	F.Intrinsic.Control.CallSub(Unload)
+F.Intrinsic.Control.Else
+	F.Intrinsic.File.File2String(V.Local.sFilePath,V.Local.sRate)
+	F.Intrinsic.Math.IsNumeric(V.Local.sRate,V.Local.bNumeric)
+	F.Intrinsic.Control.If(V.Local.bNumeric,=,False)
+		F.Intrinsic.String.Concat("Rate found in ",V.Local.sFilePath," is NOT numeric. Change Rate to a numeric value (No spaces or empty lines.) to continue",V.Local.sMSG)
+		F.Intrinsic.UI.Msgbox(V.Local.sMSG)
+		F.Intrinsic.Control.CallSub(Unload)
+	F.Intrinsic.Control.Else
+		V.Global.fRate.Set(V.Local.sRate)
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.EndIf
+
+Program.Sub.GetRate.End
+
+Program.Sub.ExportData.Start
+V.Local.sData.Declare(String)
+V.Local.sFilePath.Declare(String)
+V.Local.sElements.Declare(String)
+V.Local.bExists.Declare(Boolean)
+V.Local.sDate.Declare(String)
+V.Local.iCount.Declare(Long)
+V.Local.iCount.Set(1)
+
+F.Intrinsic.String.Format(V.Ambient.Date,"YYYYMMDD",V.Local.sDate)
+
+F.Intrinsic.Variable.UDTMultiQuickSort(V.uGlobal.uDetail!JobSuff,False,V.uGlobal.uDetail!BATCH_NUM,False)
+V.Local.sElements.Set("JOBSUFF*!*RATE*!*HOURS*!*EXTENDED*!*PERIOD*!*BATCH_NUM")
+F.Intrinsic.Variable.udttostring(V.uGlobal.uDetail,V.Local.sElements,V.Ambient.NewLine,",",V.Local.sData)
+
+F.Intrinsic.String.Concat(V.Caller.FilesDir,"\Accounting Exports\Labor\LBR-",V.Local.sDate,".csv",V.Local.sFilePath)
+F.Intrinsic.File.Exists(V.Local.sFilePath,V.Local.bExists)
+F.Intrinsic.Control.If(V.Local.bExists,=,False)
+	F.Intrinsic.File.String2File(V.Local.sFilePath,V.Local.sData)
+F.Intrinsic.Control.Else
+	F.Intrinsic.Control.DoUntil(V.Local.bExists,=,False)
+		F.Intrinsic.String.Concat(V.Caller.FilesDir,"\Accounting Exports\Labor\LBR-",V.Local.sDate,"-",V.Local.iCount,".csv",V.Local.sFilePath)
+		F.Intrinsic.File.Exists(V.Local.sFilePath,V.Local.bExists)
+		F.Intrinsic.Math.Add(V.Local.iCount,1,V.Local.iCount)
+	F.Intrinsic.Control.Loop
+	F.Intrinsic.File.String2File(V.Local.sFilePath,V.Local.sData)
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Variable.AddRV("FilePath",V.Local.sFilePath)
+F.Intrinsic.Control.ExitSub
+
+
+Program.Sub.ExportData.End
+
+Program.Sub.StopBatches.Start
+F.Intrinsic.Variable.UDTMultiFlagDuplicates(V.uGlobal.uBatches!Batch)
+F.Intrinsic.Variable.UDTDeleteFlagged(V.uGlobal.uBatches)
+
+V.Local.I.Declare(Long)
+V.Local.iID.Declare(Long)
+F.ODBC.Connection!CONX.OpenLocalRecordsetRO("rstTOP","SELECT TOP 1 KEY_ID FROM GCG_CT_PROC_BATCHES ORDER BY KEY_ID DESC")
+F.Intrinsic.Control.If(V.ODBC.CONX!rstTOP.EOF,=,True)
+	V.Local.iID.Set(0)
+F.Intrinsic.Control.Else
+	V.Local.iID.Set(V.ODBC.CONX!rstTOP.FieldValTrim!KEY_ID)
+F.Intrinsic.Control.EndIf
+F.ODBC.CONX!rstTOP.Close
+
+F.ODBC.Connection!CONX.OpenLocalRecordsetRW("rstStop","SELECT * FROM GCG_CT_PROC_BATCHES")
+F.Intrinsic.Control.For(V.Local.I,0,V.uGlobal.uBatches.UBound,1)
+	F.Intrinsic.Math.Add(V.Local.iID,1,V.Local.iID)
+	F.ODBC.CONX!rstStop.AddNew
+	F.ODBC.CONX!rstSTOP.Set!KEY_ID(V.Local.iID)
+	F.ODBC.CONX!rstSTOP.set!TYPE("LB")
+	F.ODBC.CONX!rstSTOP.Set!BATCH(V.uGlobal.uBatches(V.Local.I)!Batch.Trim)
+	F.ODBC.CONX!rstStop.Set!PROCESS_DATE(V.Ambient.Date)
+	F.ODBC.CONX!rstStop.Set!PROCESS_USER(V.Caller.User)
+F.Intrinsic.Control.Next(V.Local.I)
+F.ODBC.CONX!rstSTOP.Update
+F.ODBC.CONX!rstStop.Close
+
+Program.Sub.StopBatches.End
+
+
